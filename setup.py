@@ -9,10 +9,11 @@ setup(
         "matplotlib",
         "pandas",
         "pyyaml",
-        "wandb",   # optional
+        "wandb",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.8",
     description="Toolkit for RL/ML experiments: utils, visualizer, cluster runner, monitor, wandb helper",
-    author="Your Name",
-    url="https://github.com/kclauw/ml_research_toolkit",
+    author="Kenzo Clauw",
+    #author_email="your_email@example.com",
+    url="https://github.com/kclauw/ml-research-toolkit",
 )
