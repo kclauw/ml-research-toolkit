@@ -114,6 +114,41 @@ def remove_keys_from_dict(data: Dict[str, Any], keys: Optional[List[str]] = None
     keys_to_remove = set(keys or [])
     return {k: v for k, v in data.items() if k not in keys_to_remove}
 
+def dict_to_filename(
+            data: Dict[str, Any],
+            delimiter: str = "_",
+            ignore_keys: Optional[List[str]] = None,
+            select_keys: Optional[List[str]] = None,
+        ) -> str:
+            """
+            Combine dictionary keys and values into a string with a delimiter.
+
+            Args:
+                data (dict): Input dictionary.
+                delimiter (str, optional): Delimiter between key-value pairs. Defaults to "_".
+                ignore_keys (list[str], optional): Keys to ignore. Defaults to None.
+                select_keys (list[str], optional): If provided, only use these keys. Defaults to None.
+
+            Returns:
+                str: Combined string of keys and values.
+            """
+            if not isinstance(data, dict):
+                try:
+                    data = dict(data)
+                except Exception:
+                    raise ValueError(f"Cannot convert input of type {type(data)} to dict.")
+
+            # Filter dictionary based on ignore_keys or select_keys
+            if select_keys:
+                filtered_data = select_keys_from_dict(data, select_keys)
+            elif ignore_keys:
+                filtered_data = remove_keys_from_dict(data, ignore_keys)
+            else:
+                filtered_data = data
+
+            # Combine keys and values
+            return delimiter.join(f"{k}{delimiter}{v}" for k, v in sorted(filtered_data.items()))
+
 
 
 # ----------------- Path Utilities -----------------
