@@ -89,8 +89,8 @@ class HyperparamVisualizer(QWidget):
         self.figure.savefig(filename)
         self.status_label.setText(f"Plot saved to {filename}")
 
-def run_gui(experiment_folder, output_folder_function):
-    runs = load_runs(experiment_folder)
+def run_gui(results_folder, output_folder_function):
+    runs = load_runs(results_folder)
     app = QApplication(sys.argv)
     window = HyperparamVisualizer(runs)
     window.show()
