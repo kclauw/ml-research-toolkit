@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# run_gui.py - Updated
+# run_gui.py - Updated with navigation & download
 
 import sys
 import os
@@ -10,7 +10,6 @@ import keyring
 import json
 import re
 from functools import partial
-
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QTableWidget, QTableWidgetItem, QMessageBox,
@@ -115,12 +114,16 @@ class HPCGui(QWidget):
     def __init__(self):
         super().__init__()
         self.config = load_local_config()
-        
         self.setWindowTitle("HPC File Browser")
         self.resize(1100, 700)
         self.ssh = SSHConnection()
         self.current_path = self.config.get("default_start_dir", "/data/gent/433/vsc43397")
         self._open_dialogs = []
+
+        # Base folders for download
+        self.cluster_folder = "/data/gent/433/vsc43397/ibac-original/ib_actor_critic/runs/"
+        self.local_folder = "/Users/kenzoclauw/Research/ibac-original/ib_actor_critic/runs/"
+
         self.setup_ui()
         self.auto_connect()
 
@@ -128,7 +131,7 @@ class HPCGui(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
 
-        # Top bar for directory navigation
+        # Top bar
         dir_layout = QHBoxLayout()
         self.cwd_label = QLabel(f"Current: {self.current_path}")
         self.up_btn = QPushButton("Up")
@@ -139,12 +142,15 @@ class HPCGui(QWidget):
         self.delete_file_btn.clicked.connect(self.delete_selected_file)
         self.view_file_btn = QPushButton("View file content")
         self.view_file_btn.clicked.connect(self.view_selected_file)
+        self.download_btn = QPushButton("Download selected")
+        self.download_btn.clicked.connect(self.download_selected)
 
         dir_layout.addWidget(self.cwd_label)
         dir_layout.addWidget(self.up_btn)
         dir_layout.addWidget(self.refresh_files_btn)
         dir_layout.addWidget(self.delete_file_btn)
         dir_layout.addWidget(self.view_file_btn)
+        dir_layout.addWidget(self.download_btn)
         layout.addLayout(dir_layout)
 
         # File table
@@ -155,6 +161,7 @@ class HPCGui(QWidget):
         self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.file_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.file_table.itemDoubleClicked.connect(self.on_file_doubleclick)
         layout.addWidget(self.file_table)
 
         # Raw output log
@@ -169,7 +176,8 @@ class HPCGui(QWidget):
         key = self.config.get("default_key_path")
         passphrase = self.config.get("default_passphrase", "")
         if not host or not user or not key:
-            QMessageBox.critical(self, "Config missing", "Please set default_host, default_user, and default_key_path in ~/.hpc_gui_config.json")
+            QMessageBox.critical(self, "Config missing",
+                                 "Please set default_host, default_user, and default_key_path in ~/.hpc_gui_config.json")
             return
         try:
             self.ssh.connect(host=host, username=user, passphrase=passphrase, key_path=key)
@@ -194,7 +202,7 @@ class HPCGui(QWidget):
         entries = []
         for a in attrs:
             name = a.filename
-            if name in (".",".."): continue
+            if name in (".", ".."): continue
             full = path.rstrip("/") + "/" + name if path != "/" else "/" + name
             is_dir = stat.S_ISDIR(a.st_mode)
             entries.append((name, full, is_dir, a.st_size, a.st_mtime))
@@ -214,21 +222,18 @@ class HPCGui(QWidget):
             self.file_table.setItem(row, 3, item_mtime)
 
     def on_tree_up(self):
-        if self.current_path == "/":
-            return
+        if self.current_path == "/": return
         parent = os.path.dirname(self.current_path.rstrip("/"))
-        if parent == "":
-            parent = "/"
+        if parent == "": parent = "/"
         self.current_path = parent
         self.refresh_file_list()
 
     def delete_selected_file(self):
         sel = self.file_table.selectedItems()
-        if not sel:
-            return
+        if not sel: return
         rows = set(item.row() for item in sel)
         paths = [self.file_table.item(row, 0).data(Qt.UserRole) for row in rows]
-        if QMessageBox.question(self, "Delete", f"Delete {len(paths)} files/folders?", QMessageBox.Yes|QMessageBox.No) != QMessageBox.Yes:
+        if QMessageBox.question(self, "Delete", f"Delete {len(paths)} files/folders?", QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
         for path in paths:
             try:
@@ -242,25 +247,21 @@ class HPCGui(QWidget):
 
     def view_selected_file(self):
         selected = self.file_table.selectedItems()
-        if not selected:
-            return
+        if not selected: return
         row = selected[0].row()
         path = self.file_table.item(row, 0).data(Qt.UserRole)
         if self.ssh.isdir(path):
             QMessageBox.information(self, "Folder", "Cannot display folder content")
             return
 
-        # Match .e12345, .o12345, .txt, .log
         if not re.search(r"\.(e|o)\d+$", path) and not path.endswith((".txt", ".log")):
             QMessageBox.information(self, "Unsupported file", "Can only display .e*, .o*, .txt, .log files")
             return
 
         try:
-            # Download via SFTP
             with self.ssh.sftp.file(path, "r") as f:
                 content = f.read().decode(errors="ignore")
 
-            # Use QDialog to display
             dlg = QDialog(self)
             dlg.setWindowTitle(f"Content: {os.path.basename(path)}")
             dlg.resize(800, 600)
@@ -270,10 +271,45 @@ class HPCGui(QWidget):
             text_area.setPlainText(content)
             layout.addWidget(text_area)
             dlg.show()
-            self._open_dialogs.append(dlg)  # keep reference
+            self._open_dialogs.append(dlg)
 
         except Exception as e:
             QMessageBox.critical(self, "Error reading file", str(e))
+
+    # ---------- Download / Navigation ----------
+    def on_file_doubleclick(self, item):
+        row = item.row()
+        path = self.file_table.item(row, 0).data(Qt.UserRole)
+        if self.ssh.isdir(path):
+            self.current_path = path
+            self.refresh_file_list()
+        else:
+            self.download_file_or_folder(path)
+
+    def download_file_or_folder(self, remote_path):
+        rel_path = os.path.relpath(remote_path, self.cluster_folder)
+        local_path = os.path.join(self.local_folder, rel_path)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+        if self.ssh.isdir(remote_path):
+            for attr in self.ssh.listdir_attr(remote_path):
+                name = attr.filename
+                if name in (".", ".."): continue
+                self.download_file_or_folder(os.path.join(remote_path, name))
+        else:
+            try:
+                self.raw_output.append(f"Downloading: {remote_path} -> {local_path}")
+                self.ssh.sftp.get(remote_path, local_path)
+            except Exception as e:
+                QMessageBox.critical(self, "Download failed", str(e))
+
+    def download_selected(self):
+        sel = self.file_table.selectedItems()
+        if not sel: return
+        rows = set(item.row() for item in sel)
+        paths = [self.file_table.item(row, 0).data(Qt.UserRole) for row in rows]
+        for path in paths:
+            self.download_file_or_folder(path)
 
 # ---------- Main ----------
 def main():
@@ -284,3 +320,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
