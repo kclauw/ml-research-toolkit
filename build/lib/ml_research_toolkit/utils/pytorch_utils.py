@@ -1,8 +1,8 @@
-import utils 
 import random
 import torch
 import numpy as np 
 import os 
+from pathlib import Path
 
 def save_checkpoint(
     agent,
@@ -27,7 +27,9 @@ def save_checkpoint(
         tag (str, optional): Optional string tag for filename.
         overwrite (bool): If True, overwrite the same checkpoint file each time.
     """
-    utils.create_folder(folder)
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
 
     if overwrite:
         filename = "latest_checkpoint.pt"
